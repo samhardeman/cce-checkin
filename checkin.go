@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strconv"
 	"time"
 )
 
@@ -58,7 +59,7 @@ func displayHelp() {
 
 // runScanMode handles the barcode scanning and saving data to the CSV
 func runScanMode() {
-	file, err := os.OpenFile("scanned_barcodes.csv", os.O_APPEND|os.O_CREATE|os.O_RDWR, 0644)
+	file, err := os.OpenFile("scans.csv", os.O_APPEND|os.O_CREATE|os.O_RDWR, 0644)
 	if err != nil {
 		fmt.Println("Error opening/creating file:", err)
 		return
@@ -70,6 +71,10 @@ func runScanMode() {
 
 	// Regular expression to match numeric IDs
 	numRegex := regexp.MustCompile(`^\d+$`)
+
+	// Initialize the daily count and load the count for today if it exists
+	currentDate := time.Now().Format("2006-01-02")
+	dailyCount := getDailyCount(file, currentDate)
 
 	for {
 		fmt.Print("Barcode ID: ")
@@ -93,9 +98,18 @@ func runScanMode() {
 			continue
 		}
 
+		// Update the daily count and check if a new day has started
+		now := time.Now()
+		if now.Format("2006-01-02") != currentDate {
+			// Reset daily count and update the current date
+			currentDate = now.Format("2006-01-02")
+			dailyCount = 0
+		}
+		dailyCount++
+
 		// Generate a timestamp in local time zone
-		timestamp := time.Now().Format("2006-01-02T15:04:05-07:00")
-		record := []string{timestamp, barcodeID}
+		timestamp := now.Format("2006-01-02T15:04:05-07:00")
+		record := []string{timestamp, barcodeID, fmt.Sprintf("%d", dailyCount)}
 		if err := writer.Write(record); err != nil {
 			fmt.Println("Error writing to CSV:", err)
 			continue
@@ -108,6 +122,36 @@ func runScanMode() {
 			fmt.Println("Recorded:", record)
 		}
 	}
+}
+
+// getDailyCount reads the CSV and returns the current daily count for the specified date
+func getDailyCount(file *os.File, currentDate string) int {
+	// Go back to the beginning of the file to read all records
+	if _, err := file.Seek(0, 0); err != nil {
+		fmt.Println("Error seeking to beginning of file:", err)
+		return 0
+	}
+
+	reader := csv.NewReader(file)
+	records, err := reader.ReadAll()
+	if err != nil {
+		fmt.Println("Error reading CSV:", err)
+		return 0
+	}
+
+	// Find the maximum count for today
+	maxCount := 0
+	for _, record := range records {
+		recordDate := record[0][:10] // Extract only the date portion (YYYY-MM-DD)
+		if recordDate == currentDate && len(record) > 2 {
+			count, err := strconv.Atoi(record[2])
+			if err == nil && count > maxCount {
+				maxCount = count
+			}
+		}
+	}
+
+	return maxCount
 }
 
 // checkRecentDuplicate checks if the barcode has been recorded within the last 2 hours
