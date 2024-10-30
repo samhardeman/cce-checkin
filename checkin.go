@@ -58,7 +58,7 @@ func displayHelp() {
 
 // runScanMode handles the barcode scanning and saving data to the CSV
 func runScanMode() {
-	file, err := os.OpenFile("scans.csv", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	file, err := os.OpenFile("scanned_barcodes.csv", os.O_APPEND|os.O_CREATE|os.O_RDWR, 0644)
 	if err != nil {
 		fmt.Println("Error opening/creating file:", err)
 		return
@@ -87,6 +87,12 @@ func runScanMode() {
 			continue
 		}
 
+		// Check if this barcode ID has been scanned within the last 2 hours
+		if checkRecentDuplicate(file, barcodeID) {
+			fmt.Println("Duplicate entry within 2 hours detected. Skipping entry.")
+			continue
+		}
+
 		// Generate a timestamp in local time zone
 		timestamp := time.Now().Format("2006-01-02T15:04:05-07:00")
 		record := []string{timestamp, barcodeID}
@@ -104,9 +110,44 @@ func runScanMode() {
 	}
 }
 
+// checkRecentDuplicate checks if the barcode has been recorded within the last 2 hours
+func checkRecentDuplicate(file *os.File, barcodeID string) bool {
+	// Go back to the beginning of the file to read all records
+	if _, err := file.Seek(0, 0); err != nil {
+		fmt.Println("Error seeking to beginning of file:", err)
+		return false
+	}
+
+	reader := csv.NewReader(file)
+	records, err := reader.ReadAll()
+	if err != nil {
+		fmt.Println("Error reading CSV:", err)
+		return false
+	}
+
+	// Get the current time and the cutoff time for duplicates (2 hours ago)
+	now := time.Now()
+	twoHoursAgo := now.Add(-2 * time.Hour)
+
+	// Check each record to see if there is a recent duplicate
+	for _, record := range records {
+		recordTime, err := time.Parse("2006-01-02T15:04:05-07:00", record[0])
+		if err != nil {
+			fmt.Println("Error parsing timestamp:", err)
+			continue
+		}
+
+		if record[1] == barcodeID && recordTime.After(twoHoursAgo) {
+			return true
+		}
+	}
+
+	return false
+}
+
 // runExportMode handles reading and exporting records from a date or date range
 func runExportMode(startDate, endDate string) {
-	file, err := os.Open("scans.csv")
+	file, err := os.Open("scanned_barcodes.csv")
 	if err != nil {
 		fmt.Println("Error opening file:", err)
 		return
